@@ -1,14 +1,17 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="ko" data-theme="auto">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#f5f7f6">
-    <title>EPUB TXT Workbench</title>
+    <meta name="theme-color" content="#0a0f0d" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#f5f7f6" media="(prefers-color-scheme: light)">
+    <meta name="description" content="EPUB 파일에서 TXT, Markdown, JSON, HTML을 추출하는 브라우저 기반 변환기. 서버 업로드 없이 100% 로컬 처리.">
+    <title>EPUB Workbench — 로컬 EPUB 변환기</title>
+    <link rel="manifest" href="manifest.json">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&amp;family=IBM+Plex+Sans+KR:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script defer src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <link rel="stylesheet" href="style.css">
     <script defer src="script.js"></script>
@@ -18,25 +21,45 @@
     <a class="skip-link" href="#workspace">본문으로 이동</a>
 
     <main class="app-shell" id="workspace">
+        <!-- ── 헤더 ── -->
         <header class="masthead" aria-labelledby="appTitle">
             <div class="masthead-copy">
-                <p class="eyebrow">Local EPUB TXT Workbench</p>
-                <h1 id="appTitle">EPUB 텍스트 추출기</h1>
-                <p class="subtitle">파일은 브라우저 안에서만 열고, TXT 결과만 내려받습니다.</p>
+                <p class="eyebrow">Local EPUB Workbench · 2026</p>
+                <h1 id="appTitle">EPUB<br><span class="title-accent">Workbench</span></h1>
+                <p class="subtitle">파일은 브라우저 안에서만 처리합니다. 서버 업로드 없음, 100% 로컬.</p>
             </div>
-            <div class="privacy-strip" aria-label="처리 방식">
-                <span>서버 업로드 없음</span>
-                <span>다중 파일 지원</span>
-                <span>TXT 또는 ZIP 저장</span>
+            <div class="masthead-actions">
+                <div class="privacy-strip" aria-label="처리 방식">
+                    <span class="chip chip--dark"><span class="chip-dot"></span>서버 없음</span>
+                    <span class="chip chip--dark"><span class="chip-dot"></span>다중 파일</span>
+                    <span class="chip chip--dark"><span class="chip-dot"></span>멀티 포맷</span>
+                </div>
+                <div class="theme-group">
+                    <button type="button" class="icon-btn theme-toggle" id="themeToggle"
+                        aria-label="테마 전환" title="다크/라이트 모드 전환 (Ctrl+Shift+T)">
+                        <span class="theme-icon theme-icon--light" aria-hidden="true">☀</span>
+                        <span class="theme-icon theme-icon--dark" aria-hidden="true">☾</span>
+                    </button>
+                    <button type="button" class="icon-btn" id="shortcutHelpBtn"
+                        aria-label="키보드 단축키 안내" title="단축키 안내 (?)">⌨</button>
+                </div>
             </div>
         </header>
 
+        <!-- ── 컨트롤 패널 ── -->
         <section class="control-panel" aria-label="변환 설정">
-            <div class="drop-zone" id="dropZone" role="button" tabindex="0" aria-describedby="dropHint">
-                <input type="file" id="fileInput" accept=".epub,application/epub+zip" multiple aria-label="EPUB 파일 선택">
-                <div class="drop-mark" aria-hidden="true">
-                    <span>EPUB</span>
-                    <span>TXT</span>
+            <div class="drop-zone glass" id="dropZone" role="button" tabindex="0" aria-describedby="dropHint">
+                <input type="file" id="fileInput" accept=".epub,application/epub+zip" multiple
+                    aria-label="EPUB 파일 선택">
+                <div class="drop-visual" aria-hidden="true">
+                    <div class="drop-icon-ring">
+                        <span class="drop-icon">📖</span>
+                    </div>
+                    <div class="format-flow">
+                        <span class="format-tag tag--from">EPUB</span>
+                        <span class="format-arrow">→</span>
+                        <span class="format-tag tag--to" id="formatIndicator">TXT</span>
+                    </div>
                 </div>
                 <div class="drop-copy">
                     <p class="drop-label">EPUB 파일 선택 또는 드래그</p>
@@ -44,37 +67,74 @@
                 </div>
             </div>
 
-            <fieldset class="option-grid">
-                <legend>TXT 생성 옵션</legend>
-                <label class="toggle-row">
-                    <input type="checkbox" id="includeMetadata" checked>
-                    <span>책 제목·저자·언어 포함</span>
-                </label>
-                <label class="toggle-row">
-                    <input type="checkbox" id="includeChapterBreaks" checked>
-                    <span>챕터 구분선 포함</span>
-                </label>
-                <label class="toggle-row">
-                    <input type="checkbox" id="normalizeWhitespace" checked>
-                    <span>공백과 빈 줄 정리</span>
-                </label>
-            </fieldset>
+            <div class="options-panel glass">
+                <fieldset class="option-grid">
+                    <legend>TXT 생성 옵션</legend>
+                    <label class="toggle-row">
+                        <input type="checkbox" id="includeMetadata" checked>
+                        <span>책 제목·저자·언어 포함</span>
+                    </label>
+                    <label class="toggle-row">
+                        <input type="checkbox" id="includeChapterBreaks" checked>
+                        <span>챕터 구분선 포함</span>
+                    </label>
+                    <label class="toggle-row">
+                        <input type="checkbox" id="normalizeWhitespace" checked>
+                        <span>공백과 빈 줄 정리</span>
+                    </label>
+                </fieldset>
+
+                <fieldset class="option-grid">
+                    <legend>출력 포맷</legend>
+                    <div class="format-selector" role="radiogroup" aria-label="출력 포맷 선택">
+                        <label class="format-option">
+                            <input type="radio" name="outputFormat" value="txt" checked>
+                            <span class="format-card">
+                                <strong>TXT</strong>
+                                <small>순수 텍스트</small>
+                            </span>
+                        </label>
+                        <label class="format-option">
+                            <input type="radio" name="outputFormat" value="markdown">
+                            <span class="format-card">
+                                <strong>MD</strong>
+                                <small>Markdown</small>
+                            </span>
+                        </label>
+                        <label class="format-option">
+                            <input type="radio" name="outputFormat" value="json">
+                            <span class="format-card">
+                                <strong>JSON</strong>
+                                <small>구조화</small>
+                            </span>
+                        </label>
+                        <label class="format-option">
+                            <input type="radio" name="outputFormat" value="html">
+                            <span class="format-card">
+                                <strong>HTML</strong>
+                                <small>정제된</small>
+                            </span>
+                        </label>
+                    </div>
+                </fieldset>
+            </div>
         </section>
 
+        <!-- ── 상태 대시보드 ── -->
         <section class="status-board" aria-label="변환 현황">
-            <div class="metric">
+            <div class="metric glass">
                 <span class="metric-label">전체</span>
                 <strong id="totalCount">0</strong>
             </div>
-            <div class="metric">
+            <div class="metric glass">
                 <span class="metric-label">완료</span>
-                <strong id="successCount">0</strong>
+                <strong id="successCount" class="text-success">0</strong>
             </div>
-            <div class="metric">
+            <div class="metric glass">
                 <span class="metric-label">실패</span>
-                <strong id="errorCount">0</strong>
+                <strong id="errorCount" class="text-danger">0</strong>
             </div>
-            <div class="progress-box" aria-label="전체 진행률">
+            <div class="progress-box glass" aria-label="전체 진행률">
                 <div class="progress-copy">
                     <span id="progressLabel">대기 중</span>
                     <span id="progressCount">0/0</span>
@@ -85,71 +145,247 @@
             </div>
         </section>
 
-        <section class="workspace-grid">
-            <section class="queue-pane" aria-labelledby="queueTitle">
-                <div class="pane-header">
-                    <div>
-                        <p class="pane-kicker">Queue</p>
-                        <h2 id="queueTitle">파일 큐</h2>
+        <!-- ── 워크스페이스 (탭) ── -->
+        <section class="workspace-tabs" aria-label="작업 영역">
+            <nav class="tab-bar" role="tablist" aria-label="패널 탐색">
+                <button role="tab" class="tab-btn active" id="tabQueue" aria-selected="true"
+                    aria-controls="panelQueue">📋 파일 큐</button>
+                <button role="tab" class="tab-btn" id="tabPreview" aria-selected="false"
+                    aria-controls="panelPreview">👁 미리보기</button>
+                <button role="tab" class="tab-btn" id="tabToc" aria-selected="false"
+                    aria-controls="panelToc">📑 목차</button>
+                <button role="tab" class="tab-btn" id="tabStats" aria-selected="false"
+                    aria-controls="panelStats">📊 통계</button>
+                <button role="tab" class="tab-btn" id="tabStructure" aria-selected="false"
+                    aria-controls="panelStructure">🗂 구조</button>
+                <button role="tab" class="tab-btn" id="tabImages" aria-selected="false"
+                    aria-controls="panelImages">🖼 이미지</button>
+                <button role="tab" class="tab-btn" id="tabHistory" aria-selected="false"
+                    aria-controls="panelHistory">🕐 히스토리</button>
+            </nav>
+
+            <div class="workspace-grid">
+                <!-- 왼쪽: 파일 큐 (항상 표시) -->
+                <section class="queue-pane glass" aria-labelledby="queueTitle">
+                    <div class="pane-header">
+                        <div>
+                            <p class="pane-kicker">Queue</p>
+                            <h2 id="queueTitle">파일 큐</h2>
+                        </div>
+                        <button type="button" class="ghost-btn" id="clearBtn" disabled>비우기</button>
                     </div>
-                    <button type="button" class="ghost-button" id="clearBtn" disabled>비우기</button>
-                </div>
-                <div class="empty-state" id="emptyState">
-                    <strong>아직 파일이 없습니다.</strong>
-                    <span>EPUB을 넣으면 구조 확인, 메타데이터 추출, TXT 변환이 순서대로 진행됩니다.</span>
-                </div>
-                <div class="file-list" id="fileList" aria-live="polite"></div>
-            </section>
-
-            <section class="preview-pane" aria-labelledby="previewHeading">
-                <div class="pane-header">
-                    <div>
-                        <p class="pane-kicker">Preview</p>
-                        <h2 id="previewHeading">결과 미리보기</h2>
+                    <div class="empty-state" id="emptyState">
+                        <span class="empty-icon" aria-hidden="true">📂</span>
+                        <strong>아직 파일이 없습니다.</strong>
+                        <span>EPUB을 넣으면 구조 확인, 메타데이터 추출, 변환이 순서대로 진행됩니다.</span>
                     </div>
-                    <div class="preview-actions">
-                        <button type="button" class="ghost-button" id="copyBtn" disabled>복사</button>
-                        <button type="button" class="ghost-button" id="openPreviewBtn" disabled>전체 보기</button>
-                    </div>
+                    <div class="file-list" id="fileList" aria-live="polite"></div>
+                </section>
+
+                <!-- 오른쪽: 탭 컨텐츠 -->
+                <div class="tab-panels">
+                    <!-- 미리보기 패널 -->
+                    <section class="tab-panel glass active" id="panelPreview" role="tabpanel"
+                        aria-labelledby="tabPreview">
+                        <div class="pane-header">
+                            <div>
+                                <p class="pane-kicker">Preview</p>
+                                <h2>결과 미리보기</h2>
+                            </div>
+                            <div class="preview-actions">
+                                <button type="button" class="ghost-btn" id="copyBtn" disabled>📋 복사</button>
+                                <button type="button" class="ghost-btn" id="openPreviewBtn" disabled>🔍 전체
+                                    보기</button>
+                            </div>
+                        </div>
+                        <dl class="metadata-list" id="metadataList" aria-label="EPUB 메타데이터"></dl>
+                        <label class="search-box" for="previewSearch">
+                            <span>미리보기 검색</span>
+                            <input type="search" id="previewSearch" autocomplete="off" placeholder="검색어 입력…"
+                                disabled>
+                        </label>
+                        <p class="search-result" id="searchResult" aria-live="polite">변환된 파일을 선택하세요.</p>
+                        <pre class="preview-content code-block" id="previewContent"
+                            tabindex="0">변환 결과가 여기에 표시됩니다.</pre>
+                    </section>
+
+                    <!-- 파일 큐 패널 (모바일) -->
+                    <section class="tab-panel" id="panelQueue" role="tabpanel" aria-labelledby="tabQueue">
+                        <p class="mobile-note">← 왼쪽 파일 큐를 확인하세요 (데스크톱에서는 항상 표시됩니다)</p>
+                    </section>
+
+                    <!-- 목차 패널 -->
+                    <section class="tab-panel" id="panelToc" role="tabpanel" aria-labelledby="tabToc">
+                        <div class="pane-header">
+                            <div>
+                                <p class="pane-kicker">Table of Contents</p>
+                                <h2>목차</h2>
+                            </div>
+                        </div>
+                        <div class="toc-empty" id="tocEmpty">
+                            <span class="empty-icon" aria-hidden="true">📑</span>
+                            <strong>변환된 파일을 선택하면 목차가 표시됩니다.</strong>
+                        </div>
+                        <nav class="toc-tree" id="tocTree" aria-label="챕터 목차"></nav>
+                    </section>
+
+                    <!-- 통계 패널 -->
+                    <section class="tab-panel" id="panelStats" role="tabpanel" aria-labelledby="tabStats">
+                        <div class="pane-header">
+                            <div>
+                                <p class="pane-kicker">Statistics</p>
+                                <h2>텍스트 통계</h2>
+                            </div>
+                        </div>
+                        <div class="stats-empty" id="statsEmpty">
+                            <span class="empty-icon" aria-hidden="true">📊</span>
+                            <strong>변환된 파일을 선택하면 통계가 표시됩니다.</strong>
+                        </div>
+                        <div class="stats-grid" id="statsGrid">
+                            <div class="stat-card glass">
+                                <span class="stat-label">총 글자수</span>
+                                <strong class="stat-value" id="statChars">—</strong>
+                            </div>
+                            <div class="stat-card glass">
+                                <span class="stat-label">총 단어수</span>
+                                <strong class="stat-value" id="statWords">—</strong>
+                            </div>
+                            <div class="stat-card glass">
+                                <span class="stat-label">예상 읽기 시간</span>
+                                <strong class="stat-value" id="statReadTime">—</strong>
+                            </div>
+                            <div class="stat-card glass">
+                                <span class="stat-label">챕터 수</span>
+                                <strong class="stat-value" id="statChapters">—</strong>
+                            </div>
+                        </div>
+                        <div class="chart-section" id="chapterChart">
+                            <h3>챕터별 분량</h3>
+                            <div class="bar-chart" id="barChart"></div>
+                        </div>
+                        <div class="chart-section" id="topWordsSection">
+                            <h3>자주 사용된 단어 TOP 10</h3>
+                            <ol class="top-words" id="topWordsList"></ol>
+                        </div>
+                    </section>
+
+                    <!-- EPUB 구조 패널 -->
+                    <section class="tab-panel" id="panelStructure" role="tabpanel"
+                        aria-labelledby="tabStructure">
+                        <div class="pane-header">
+                            <div>
+                                <p class="pane-kicker">EPUB Structure</p>
+                                <h2>내부 구조</h2>
+                            </div>
+                        </div>
+                        <div class="structure-empty" id="structureEmpty">
+                            <span class="empty-icon" aria-hidden="true">🗂</span>
+                            <strong>EPUB을 변환하면 내부 파일 구조를 탐색할 수 있습니다.</strong>
+                        </div>
+                        <div class="structure-tree" id="structureTree"></div>
+                    </section>
+
+                    <!-- 이미지 패널 -->
+                    <section class="tab-panel" id="panelImages" role="tabpanel" aria-labelledby="tabImages">
+                        <div class="pane-header">
+                            <div>
+                                <p class="pane-kicker">Images</p>
+                                <h2>이미지 추출</h2>
+                            </div>
+                            <button type="button" class="ghost-btn" id="downloadAllImagesBtn"
+                                disabled>📦 전체 다운로드</button>
+                        </div>
+                        <div class="images-empty" id="imagesEmpty">
+                            <span class="empty-icon" aria-hidden="true">🖼</span>
+                            <strong>EPUB을 변환하면 내부 이미지를 추출할 수 있습니다.</strong>
+                        </div>
+                        <div class="image-grid" id="imageGrid"></div>
+                    </section>
+
+                    <!-- 히스토리 패널 -->
+                    <section class="tab-panel" id="panelHistory" role="tabpanel"
+                        aria-labelledby="tabHistory">
+                        <div class="pane-header">
+                            <div>
+                                <p class="pane-kicker">History</p>
+                                <h2>변환 기록</h2>
+                            </div>
+                            <button type="button" class="ghost-btn" id="clearHistoryBtn">🗑 기록 삭제</button>
+                        </div>
+                        <div class="history-empty" id="historyEmpty">
+                            <span class="empty-icon" aria-hidden="true">🕐</span>
+                            <strong>변환 기록이 없습니다.</strong>
+                            <span>변환 완료 시 자동으로 기록됩니다.</span>
+                        </div>
+                        <div class="history-list" id="historyList"></div>
+                    </section>
                 </div>
-
-                <dl class="metadata-list" id="metadataList" aria-label="EPUB 메타데이터"></dl>
-
-                <label class="search-box" for="previewSearch">
-                    <span>미리보기 검색</span>
-                    <input type="search" id="previewSearch" autocomplete="off" placeholder="검색어 입력…" disabled>
-                </label>
-                <p class="search-result" id="searchResult" aria-live="polite">변환된 파일을 선택하세요.</p>
-
-                <pre class="preview-content" id="previewContent" tabindex="0">변환 결과가 여기에 표시됩니다.</pre>
-            </section>
+            </div>
         </section>
 
-        <section class="log-pane" aria-label="처리 로그">
+        <!-- ── 로그 ── -->
+        <section class="log-pane glass" aria-label="처리 로그">
             <div class="pane-header compact">
                 <div>
                     <p class="pane-kicker">Log</p>
                     <h2>처리 로그</h2>
                 </div>
+                <button type="button" class="ghost-btn ghost-btn--sm" id="toggleLogBtn">접기</button>
             </div>
-            <div id="logArea" role="log" aria-live="polite"></div>
+            <div id="logArea" class="code-block" role="log" aria-live="polite"></div>
         </section>
 
-        <footer class="export-bar" aria-label="내보내기">
-            <p id="exportSummary">성공한 TXT 파일이 있으면 다운로드할 수 있습니다.</p>
+        <!-- ── 내보내기 바 ── -->
+        <footer class="export-bar glass" aria-label="내보내기">
+            <p id="exportSummary">성공한 파일이 있으면 다운로드할 수 있습니다.</p>
             <div class="export-actions">
-                <button type="button" class="secondary-button" id="resetBtn" disabled>다시 시작</button>
-                <button type="button" class="primary-button" id="downloadAllBtn" disabled>TXT 다운로드</button>
+                <button type="button" class="btn btn--secondary" id="resetBtn" disabled>↺ 다시 시작</button>
+                <button type="button" class="btn btn--primary" id="downloadAllBtn" disabled>⬇ TXT 다운로드</button>
             </div>
         </footer>
     </main>
 
-    <dialog class="preview-dialog" id="previewDialog" aria-labelledby="dialogTitle">
+    <!-- ── 다이얼로그: 전체 미리보기 ── -->
+    <dialog class="dialog glass" id="previewDialog" aria-labelledby="dialogTitle">
         <div class="dialog-header">
             <h2 id="dialogTitle">전체 미리보기</h2>
-            <button type="button" class="icon-button" id="closePreviewBtn" aria-label="전체 미리보기 닫기">x</button>
+            <button type="button" class="icon-btn" id="closePreviewBtn" aria-label="닫기">✕</button>
         </div>
-        <pre id="dialogContent" class="dialog-content"></pre>
+        <pre id="dialogContent" class="dialog-content code-block"></pre>
+    </dialog>
+
+    <!-- ── 다이얼로그: 키보드 단축키 ── -->
+    <dialog class="dialog glass" id="shortcutDialog" aria-labelledby="shortcutDialogTitle">
+        <div class="dialog-header">
+            <h2 id="shortcutDialogTitle">⌨ 키보드 단축키</h2>
+            <button type="button" class="icon-btn" id="closeShortcutBtn" aria-label="닫기">✕</button>
+        </div>
+        <div class="shortcut-grid">
+            <div class="shortcut-group">
+                <h3>파일</h3>
+                <dl class="shortcut-list">
+                    <div><dt><kbd>Ctrl</kbd>+<kbd>O</kbd></dt><dd>파일 열기</dd></div>
+                    <div><dt><kbd>Ctrl</kbd>+<kbd>D</kbd></dt><dd>다운로드</dd></div>
+                    <div><dt><kbd>Ctrl</kbd>+<kbd>C</kbd></dt><dd>미리보기 복사</dd></div>
+                </dl>
+            </div>
+            <div class="shortcut-group">
+                <h3>네비게이션</h3>
+                <dl class="shortcut-list">
+                    <div><dt><kbd>↑</kbd> / <kbd>↓</kbd></dt><dd>파일 큐 탐색</dd></div>
+                    <div><dt><kbd>Ctrl</kbd>+<kbd>K</kbd></dt><dd>검색 포커스</dd></div>
+                    <div><dt><kbd>1</kbd>–<kbd>7</kbd></dt><dd>탭 전환</dd></div>
+                </dl>
+            </div>
+            <div class="shortcut-group">
+                <h3>기타</h3>
+                <dl class="shortcut-list">
+                    <div><dt><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>T</kbd></dt><dd>테마 전환</dd></div>
+                    <div><dt><kbd>?</kbd></dt><dd>이 안내 열기</dd></div>
+                    <div><dt><kbd>Esc</kbd></dt><dd>다이얼로그 닫기</dd></div>
+                </dl>
+            </div>
+        </div>
     </dialog>
 </body>
 

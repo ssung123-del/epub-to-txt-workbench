@@ -1,0 +1,20 @@
+{
+    "name": "EPUB Workbench",
+    "short_name": "EPUB WB",
+    "description": "EPUB 파일에서 TXT, Markdown, JSON, HTML을 추출하는 브라우저 기반 변환기. 서버 업로드 없이 100% 로컬 처리.",
+    "start_url": "./index.html",
+    "display": "standalone",
+    "background_color": "#0a0f0d",
+    "theme_color": "#007f5f",
+    "lang": "ko",
+    "orientation": "any",
+    "categories": ["utilities", "productivity"],
+    "icons": [
+        {
+            "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%23007f5f'/><text x='50' y='68' font-size='50' text-anchor='middle' fill='white'>📖</text></svg>",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any"
+        }
+    ]
+}
