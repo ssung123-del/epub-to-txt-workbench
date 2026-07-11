@@ -58,7 +58,7 @@
                     <div class="format-flow">
                         <span class="format-tag tag--from">EPUB</span>
                         <span class="format-arrow">→</span>
-                        <span class="format-tag tag--to" id="formatIndicator">TXT</span>
+                        <span class="format-tag tag--to" id="formatIndicator">MD</span>
                     </div>
                 </div>
                 <div class="drop-copy">
@@ -88,14 +88,14 @@
                     <legend>출력 포맷</legend>
                     <div class="format-selector" role="radiogroup" aria-label="출력 포맷 선택">
                         <label class="format-option">
-                            <input type="radio" name="outputFormat" value="txt" checked>
+                            <input type="radio" name="outputFormat" value="txt">
                             <span class="format-card">
                                 <strong>TXT</strong>
                                 <small>순수 텍스트</small>
                             </span>
                         </label>
                         <label class="format-option">
-                            <input type="radio" name="outputFormat" value="markdown">
+                            <input type="radio" name="outputFormat" value="markdown" checked>
                             <span class="format-card">
                                 <strong>MD</strong>
                                 <small>Markdown</small>
@@ -368,7 +368,7 @@
             <p id="exportSummary">성공한 파일이 있으면 다운로드할 수 있습니다.</p>
             <div class="export-actions">
                 <button type="button" class="btn btn--secondary" id="resetBtn" disabled>↺ 다시 시작</button>
-                <button type="button" class="btn btn--primary" id="downloadAllBtn" disabled>⬇ TXT 다운로드</button>
+                <button type="button" class="btn btn--primary" id="downloadAllBtn" disabled>⬇ MD 다운로드</button>
             </div>
         </footer>
     </main>
