@@ -162,6 +162,8 @@
                     aria-controls="panelImages">🖼 이미지</button>
                 <button role="tab" class="tab-btn" id="tabHistory" aria-selected="false"
                     aria-controls="panelHistory">🕐 히스토리</button>
+                <button role="tab" class="tab-btn" id="tabRename" aria-selected="false"
+                    aria-controls="panelRename">📝 파일명 동기화</button>
             </nav>
 
             <div class="workspace-grid">
@@ -318,6 +320,32 @@
                             <span>변환 완료 시 자동으로 기록됩니다.</span>
                         </div>
                         <div class="history-list" id="historyList"></div>
+                    </section>
+
+                    <!-- 파일명 동기화 패널 -->
+                    <section class="tab-panel" id="panelRename" role="tabpanel"
+                        aria-labelledby="tabRename">
+                        <div class="pane-header">
+                            <div>
+                                <p class="pane-kicker">Filename Sync</p>
+                                <h2>📝 파일명 동기화</h2>
+                            </div>
+                            <button type="button" class="btn btn--primary" id="downloadRenamedBtn" disabled>⬇ 동기화된 파일 다운로드</button>
+                        </div>
+                        <p class="rename-description">EPUB 내부 메타데이터(dc:title, dc:creator)에서 <strong>진짜 책 제목</strong>과 <strong>저자</strong>를 추출하여 파일명을 동기화합니다.<br>원본 파일은 변경되지 않으며, 올바른 이름으로 다시 다운로드할 수 있습니다.</p>
+
+                        <div class="rename-dropzone glass" id="renameDropZone" role="button" tabindex="0">
+                            <input type="file" id="renameFileInput" accept=".epub,application/epub+zip" multiple>
+                            <span class="empty-icon" aria-hidden="true">📝</span>
+                            <strong>파일명을 동기화할 EPUB 파일을 드래그하세요</strong>
+                            <span>여러 파일을 한 번에 넣을 수 있습니다.</span>
+                        </div>
+
+                        <div class="rename-empty" id="renameEmpty">
+                            <span class="empty-icon" aria-hidden="true">📂</span>
+                            <strong>동기화할 파일이 없습니다.</strong>
+                        </div>
+                        <div class="rename-results" id="renameResults"></div>
                     </section>
                 </div>
             </div>

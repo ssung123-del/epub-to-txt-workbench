@@ -1015,8 +1015,8 @@ async function clearHistory() {
 }
 
 // ─── 탭 시스템 ───
-const TAB_IDS = ['tabQueue', 'tabPreview', 'tabToc', 'tabStats', 'tabStructure', 'tabImages', 'tabHistory'];
-const PANEL_IDS = ['panelQueue', 'panelPreview', 'panelToc', 'panelStats', 'panelStructure', 'panelImages', 'panelHistory'];
+const TAB_IDS = ['tabQueue', 'tabPreview', 'tabToc', 'tabStats', 'tabStructure', 'tabImages', 'tabHistory', 'tabRename'];
+const PANEL_IDS = ['panelQueue', 'panelPreview', 'panelToc', 'panelStats', 'panelStructure', 'panelImages', 'panelHistory', 'panelRename'];
 
 /** 탭 활성화 — 선택된 탭과 패널에 active 클래스 토글 */
 function activateTab(tabId) {
@@ -1831,7 +1831,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── 1-7 — 탭 전환 ──
     const num = parseInt(e.key, 10);
-    if (num >= 1 && num <= 7) {
+    if (num >= 1 && num <= 8) {
       e.preventDefault();
       activateTab(TAB_IDS[num - 1]);
       return;
@@ -1845,4 +1845,302 @@ document.addEventListener('DOMContentLoaded', () => {
   activateTab('tabPreview');
 
   addLog('🚀 EPUB Workbench 2026 준비 완료');
+
+  // ═══════════════════════════════════════════════════════
+  // 파일명 동기화 기능 (Filename Sync)
+  // 왜: EPUB 내부 메타데이터의 dc:title이 실제 책 제목이며,
+  //     파일명은 다운로드 시 완리되어 의미 없는 태그가 붙는 경우가 많음.
+  //     내부 제목을 기준으로 파일명을 정리하여 다운로드 제공.
+  // 어떻게: JSZip으로 EPUB 내부 container.xml → OPF → dc:title/dc:creator 추출
+  // ═══════════════════════════════════════════════════════
+
+  /** 파일명에 사용할 수 없는 문자 제거 및 정리 */
+  function sanitizeForFilename(name) {
+    return name
+      .replace(/[\\/:*?"<>|]/g, '')
+      .replace(/[\u00AB\u00BB\uD835\uDC0F\uD835\uDC01\uD835\uDC08\uD835\uDC11\uD835\uDC12\uD835\uDC13\uD835\uDC14]/g, '')
+      .replace(/\s+/g, ' ')
+      .replace(/\.+$/g, '')
+      .trim()
+      .slice(0, 200);
+  }
+
+  /**
+   * EPUB(ZIP) 내부에서 container.xml → OPF 경로 → dc:title 및 dc:creator를 추출
+   * 왜 JSZip 사용: 브라우저에서 실행해야 하므로 unzip CLI 대신 이미 로드된 JSZip 활용
+   */
+  async function extractEpubTitleAndAuthor(file) {
+    try {
+      const zip = await JSZip.loadAsync(file);
+
+      // 1단계: container.xml에서 OPF 경로 찾기
+      const containerEntry = zip.file('META-INF/container.xml');
+      if (!containerEntry) return { title: null, author: null };
+
+      const containerXml = await containerEntry.async('string');
+      const containerDoc = new DOMParser().parseFromString(containerXml, 'application/xml');
+      const rootFiles = containerDoc.getElementsByTagName('rootfile');
+      if (!rootFiles.length) return { title: null, author: null };
+
+      const opfPath = rootFiles[0].getAttribute('full-path');
+      if (!opfPath) return { title: null, author: null };
+
+      // 2단계: OPF 파일에서 dc:title, dc:creator 추출
+      const opfEntry = zip.file(opfPath);
+      if (!opfEntry) return { title: null, author: null };
+
+      const opfContent = await opfEntry.async('string');
+      const opfDoc = new DOMParser().parseFromString(opfContent, 'application/xml');
+
+      // dc:title 또는 title 태그 찾기 (네임스페이스 유연 대응)
+      let title = null;
+      const titleEls = opfDoc.querySelectorAll('title');
+      for (const el of titleEls) {
+        const t = el.textContent?.trim();
+        if (t) { title = t; break; }
+      }
+
+      let author = null;
+      const creatorEls = opfDoc.querySelectorAll('creator');
+      for (const el of creatorEls) {
+        const a = el.textContent?.trim();
+        if (a) { author = a; break; }
+      }
+
+      return { title, author };
+    } catch {
+      return { title: null, author: null };
+    }
+  }
+
+  /**
+   * 새 파일명 결정: "제목 (저자).epub"
+   * 제목 추출 실패 시 기존 파일명에서 z-library 태그만 제거하는 폴백 적용
+   */
+  function buildNewFileName(originalName, title, author) {
+    if (title) {
+      const cleanTitle = sanitizeForFilename(title);
+      const authorPart = author ? ` (${sanitizeForFilename(author)})` : '';
+      return cleanTitle + authorPart + '.epub';
+    }
+
+    // 폴백: 기존 파일명에서 z-library 태그 제거
+    let name = originalName.replace(/\.epub$/i, '');
+    name = name.replace(/\s*\(z-library[^)]*\)/gi, '');
+    name = name.replace(/\s*\(\d+\)$/g, '');
+    name = name.replace(/\s*\(양장본[^)]*\)/gi, '');
+    name = name.replace(/\s*\(보급판\)/gi, '');
+    name = name.replace(/[\u1100-\u11FF]~[\u1161-\u1175]?\S*/g, '').trim();
+    name = name.replace(/\s+/g, ' ').trim();
+    return name + '.epub';
+  }
+
+  // 파일명 동기화 상태 저장소
+  let renameEntries = [];
+
+  /** 파일명 동기화 결과 렌더링 */
+  function renderRenameResults() {
+    const container = $('renameResults');
+    const emptyEl = $('renameEmpty');
+    const downloadBtn = $('downloadRenamedBtn');
+
+    if (!renameEntries.length) {
+      container.innerHTML = '';
+      emptyEl.style.display = 'flex';
+      downloadBtn.disabled = true;
+      return;
+    }
+
+    emptyEl.style.display = 'none';
+
+    // 요약 통계
+    const changed = renameEntries.filter(e => e.oldName !== e.newName).length;
+    const same = renameEntries.filter(e => e.oldName === e.newName).length;
+    const errors = renameEntries.filter(e => !e.title).length;
+
+    let html = `<div class="rename-summary">
+      <span class="count-changed">🔄 변경: ${changed}개</span>
+      <span class="count-same">✅ 동일: ${same}개</span>
+      <span class="count-error">⚠️ 제목없음: ${errors}개</span>
+    </div>`;
+
+    renameEntries.forEach((entry, i) => {
+      const isChanged = entry.oldName !== entry.newName;
+      const statusIcon = entry.title ? (isChanged ? '🔄' : '✅') : '⚠️';
+
+      html += `<div class="rename-item" style="--i:${i}">
+        <span class="rename-status">${statusIcon}</span>
+        <div class="rename-info">`;
+
+      if (isChanged) {
+        html += `<span class="rename-old" title="${entry.oldName}">${entry.oldName}</span>
+          <span class="rename-new" title="${entry.newName}">${entry.newName}</span>`;
+      } else {
+        html += `<span class="rename-same" title="${entry.oldName}">${entry.oldName} (동일)</span>`;
+      }
+
+      html += `</div>
+        <div class="rename-action">
+          <button class="btn btn--secondary" data-rename-idx="${i}">⬇ 다운로드</button>
+        </div>
+      </div>`;
+    });
+
+    container.innerHTML = html;
+    downloadBtn.disabled = changed === 0;
+
+    // 개별 다운로드 버튼 이벤트
+    container.querySelectorAll('[data-rename-idx]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = parseInt(btn.dataset.renameIdx, 10);
+        const entry = renameEntries[idx];
+        if (!entry) return;
+
+        // EPUB 파일을 새 이름으로 다운로드
+        const url = URL.createObjectURL(entry.file);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = entry.newName;
+        a.click();
+        URL.revokeObjectURL(url);
+
+        addLog(`📝 파일명 동기화 다운로드: ${entry.newName}`);
+      });
+    });
+  }
+
+  /** 파일명 동기화용 EPUB 파일 처리 */
+  async function processRenameFiles(fileList) {
+    const epubFiles = Array.from(fileList).filter(f => f.name.toLowerCase().endsWith('.epub'));
+    if (!epubFiles.length) {
+      addLog('⚠️ 파일명 동기화: EPUB 파일이 없습니다.');
+      return;
+    }
+
+    addLog(`📝 파일명 동기화: ${epubFiles.length}개 파일 분석 시작...`);
+
+    // 1단계: 모든 파일의 메타데이터 수집
+    renameEntries = [];
+    for (const file of epubFiles) {
+      const { title, author } = await extractEpubTitleAndAuthor(file);
+      const newName = buildNewFileName(file.name, title, author);
+      renameEntries.push({ file, oldName: file.name, newName, title, author });
+    }
+
+    // 2단계: 중복 제목 감지 (메타데이터 오류 의심)
+    // 왜: 같은 시리즈의 EPUB이 내부적으로 동일 제목을 가진 경우 있음 (e.g. 하버드 강의 시리즈)
+    const titleCounts = {};
+    renameEntries.forEach(e => {
+      if (e.title) {
+        const key = e.title.toLowerCase();
+        titleCounts[key] = (titleCounts[key] || 0) + 1;
+      }
+    });
+
+    const duplicatedTitles = new Set(
+      Object.entries(titleCounts)
+        .filter(([, count]) => count > 1)
+        .map(([key]) => key)
+    );
+
+    // 중복 제목인 경우 기존 파일명 기반으로 폴백
+    if (duplicatedTitles.size > 0) {
+      addLog(`⚠️ 중복 제목 ${duplicatedTitles.size}건 감지 — 기존 파일명 기반으로 정리합니다.`);
+      renameEntries.forEach(e => {
+        if (e.title && duplicatedTitles.has(e.title.toLowerCase())) {
+          e.newName = buildNewFileName(e.oldName, null, null);
+        }
+      });
+    }
+
+    // 3단계: 중복 파일명 방지
+    const usedNames = new Set();
+    renameEntries.forEach(e => {
+      let finalName = e.newName;
+      let counter = 2;
+      while (usedNames.has(finalName.toLowerCase()) && counter <= 10) {
+        const ext = finalName.slice(finalName.lastIndexOf('.'));
+        const base = finalName.slice(0, finalName.lastIndexOf('.'));
+        finalName = `${base} (${counter})${ext}`;
+        counter++;
+      }
+      usedNames.add(finalName.toLowerCase());
+      e.newName = finalName;
+    });
+
+    const changedCount = renameEntries.filter(e => e.oldName !== e.newName).length;
+    addLog(`📝 분석 완료: ${changedCount}개 변경 예정, ${renameEntries.length - changedCount}개 동일`);
+
+    renderRenameResults();
+  }
+
+  // 파일명 동기화 드롭존 이벤트
+  const renameDropZone = $('renameDropZone');
+  const renameFileInput = $('renameFileInput');
+
+  if (renameDropZone && renameFileInput) {
+    renameFileInput.addEventListener('change', (e) => {
+      if (e.target.files.length) processRenameFiles(e.target.files);
+    });
+
+    renameDropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      renameDropZone.classList.add('drag-over');
+    });
+
+    renameDropZone.addEventListener('dragleave', () => {
+      renameDropZone.classList.remove('drag-over');
+    });
+
+    renameDropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      renameDropZone.classList.remove('drag-over');
+      if (e.dataTransfer.files.length) processRenameFiles(e.dataTransfer.files);
+    });
+
+    renameDropZone.addEventListener('click', () => renameFileInput.click());
+    renameDropZone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        renameFileInput.click();
+      }
+    });
+  }
+
+  // 전체 다운로드 버튼: 변경된 파일들을 ZIP으로 묶어 다운로드
+  const downloadRenamedBtn = $('downloadRenamedBtn');
+  if (downloadRenamedBtn) {
+    downloadRenamedBtn.addEventListener('click', async () => {
+      const changedEntries = renameEntries.filter(e => e.oldName !== e.newName);
+      if (!changedEntries.length) return;
+
+      if (changedEntries.length === 1) {
+        // 단일 파일: 직접 다운로드
+        const entry = changedEntries[0];
+        const url = URL.createObjectURL(entry.file);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = entry.newName;
+        a.click();
+        URL.revokeObjectURL(url);
+        addLog(`📝 파일명 동기화 다운로드: ${entry.newName}`);
+      } else {
+        // 여러 파일: ZIP으로 묶어 다운로드
+        addLog(`📦 ${changedEntries.length}개 파일 ZIP 압축 중...`);
+        const zip = new JSZip();
+        for (const entry of changedEntries) {
+          const buf = await entry.file.arrayBuffer();
+          zip.file(entry.newName, buf);
+        }
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'epub-renamed.zip';
+        a.click();
+        URL.revokeObjectURL(url);
+        addLog(`✅ ZIP 다운로드 완료: epub-renamed.zip (${changedEntries.length}개 파일)`);
+      }
+    });
+  }
 });

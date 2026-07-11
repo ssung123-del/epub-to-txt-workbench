@@ -1841,7 +1841,175 @@ kbd {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   34. PRINT STYLES
+   34. RENAME / FILENAME SYNC PANEL
+   ══════════════════════════════════════════════════════════════ */
+
+/* 설명 텍스트 */
+.rename-description {
+  font-size: 0.92rem;
+  color: var(--text-soft);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+  padding: 0 0.5rem;
+}
+
+/* 전용 드롭존 — 메인 드롭존과 비슷하지만 더 작게 */
+.rename-dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 2rem 1.5rem;
+  margin-bottom: 1.5rem;
+  border: 2px dashed var(--line);
+  border-radius: var(--radius);
+  text-align: center;
+  cursor: pointer;
+  transition: all 250ms cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+}
+
+.rename-dropzone input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.rename-dropzone:hover,
+.rename-dropzone.drag-over {
+  border-color: var(--accent);
+  background: var(--surface-tint);
+  transform: translateY(-2px);
+  box-shadow: 0 0 16px var(--accent-glow);
+}
+
+.rename-dropzone .empty-icon {
+  font-size: 2rem;
+}
+
+.rename-dropzone strong {
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.rename-dropzone span {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+/* 빈 상태 */
+.rename-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+/* 결과 테이블 */
+.rename-results {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.rename-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: var(--surface-glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  animation: fadeSlideIn 350ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+.rename-item .rename-status {
+  font-size: 1.2rem;
+  width: 2rem;
+  text-align: center;
+}
+
+.rename-item .rename-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.rename-old {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  text-decoration: line-through;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rename-new {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rename-same {
+  font-size: 0.92rem;
+  color: var(--text-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rename-item .rename-action {
+  flex-shrink: 0;
+}
+
+.rename-item .rename-action .btn {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.75rem;
+}
+
+/* 요약 바 */
+.rename-summary {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  background: var(--surface-tint);
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-soft);
+  font-family: var(--font-mono);
+}
+
+.rename-summary .count-changed { color: var(--accent); }
+.rename-summary .count-same { color: var(--text-muted); }
+.rename-summary .count-error { color: var(--danger); }
+
+@media (max-width: 680px) {
+  .rename-item {
+    grid-template-columns: auto 1fr;
+  }
+  .rename-item .rename-action {
+    grid-column: 1 / -1;
+    justify-self: end;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   35. PRINT STYLES
    ══════════════════════════════════════════════════════════════ */
 @media print {
   body::before {
