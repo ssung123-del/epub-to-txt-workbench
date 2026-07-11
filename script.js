@@ -79,14 +79,40 @@ function sanitizeText(value, fallback = '') {
 function sanitizeFileBase(name) {
   return name
     .replace(/\.epub$/i, '')
-    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
-    .replace(/_+/g, '_')
+    .replace(/[\\/:*?"<>|]/g, '')
+    .replace(/[\u00AB\u00BB\uD835\uDC0F\uD835\uDC01\uD835\uDC08\uD835\uDC11\uD835\uDC12\uD835\uDC13\uD835\uDC14]/g, '')
+    .replace(/\s+/g, ' ')
     .trim() || 'output';
 }
 
+/** EPUB 파일의 진짜 책제목과 저자 메타데이터 또는 파일명 폴백을 사용한 청정 베이스 이름 결정 */
+function determineCleanBaseName(originalName, metadata) {
+  const title = metadata && metadata.title && metadata.title !== '(제목 없음)' ? metadata.title : null;
+  const author = metadata && metadata.creator && metadata.creator !== '(저자 미상)' ? metadata.creator : null;
+  
+  if (title) {
+    const cleanTitle = sanitizeFileBase(title);
+    if (cleanTitle && cleanTitle !== 'output') {
+      const cleanAuthor = author ? sanitizeFileBase(author) : '';
+      const authorPart = cleanAuthor && cleanAuthor !== 'output' ? ` (${cleanAuthor})` : '';
+      return cleanTitle + authorPart;
+    }
+  }
+
+  // 폴백: 기존 파일명에서 z-library 태그 등 제거
+  let name = originalName.replace(/\.epub$/i, '');
+  name = name.replace(/\s*\(z-library[^)]*\)/gi, '');
+  name = name.replace(/\s*\(\d+\)$/g, '');
+  name = name.replace(/\s*\(양장본[^)]*\)/gi, '');
+  name = name.replace(/\s*\(보급판\)/gi, '');
+  name = name.replace(/[\u1100-\u11FF]~[\u1161-\u1175]?\S*/g, '').trim();
+  name = name.replace(/\s+/g, ' ').trim();
+  return sanitizeFileBase(name);
+}
+
 /** 중복 방지 출력 파일명 생성 — 같은 이름 파일이 여러 개일 때 번호 부여 */
-function makeUniqueTxtName(fileName, registry, ext = '.txt') {
-  const base = sanitizeFileBase(fileName);
+function makeUniqueTxtName(baseName, registry, ext = '.txt') {
+  const base = sanitizeFileBase(baseName);
   let candidate = base + ext;
   let counter = 1;
   while (registry.has(candidate)) {
@@ -764,7 +790,8 @@ async function processFiles(fileList) {
       job.tocData = result.tocData;
       job.structureData = result.structureData;
       job.imageData = result.imageData;
-      job.outputName = makeUniqueTxtName(job.fileName, nameRegistry, getFormatExtension(format));
+      const cleanBase = determineCleanBaseName(job.fileName, job.metadata);
+      job.outputName = makeUniqueTxtName(cleanBase, nameRegistry, getFormatExtension(format));
       job.status = 'success';
       addLog(`✅ 완료: "${job.fileName}" → ${job.outputName}`);
 
@@ -819,7 +846,8 @@ async function retryJob(jobId) {
     job.structureData = result.structureData;
     job.imageData = result.imageData;
     const nameRegistry = new Set(jobs.filter((j) => j.outputName && j.id !== jobId).map((j) => j.outputName));
-    job.outputName = makeUniqueTxtName(job.fileName, nameRegistry, getFormatExtension(format));
+    const cleanBase = determineCleanBaseName(job.fileName, job.metadata);
+    job.outputName = makeUniqueTxtName(cleanBase, nameRegistry, getFormatExtension(format));
     job.format = format;
     job.status = 'success';
     addLog(`✅ 재시도 완료: "${job.fileName}"`);
