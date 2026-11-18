@@ -260,7 +260,7 @@ function getChapterTitle(htmlDoc, fallback) {
 }
 
 /** ZIP 엔트리에서 챕터 텍스트 추출 — HTML 태그 제거, 공백 정규화 */
-async function extractChapter(entry, num, options, targets) {
+async function extractChapter(entry, num, options, targets, resolveImage) {
   const html = await entry.async('string');
   const doc = parseXml(html, `Chapter ${num}`);
   const fallback = `Chapter ${num}`;
@@ -272,7 +272,22 @@ async function extractChapter(entry, num, options, targets) {
   if (doc) {
     const body = doc.querySelector('body') || doc.documentElement;
     text = body ? body.textContent : '';
-    if (targets && text.trim()) sections = getMarkdownSections(body, targets, options);
+    if (resolveImage && body) {
+      let inserted = false;
+      for (const el of body.querySelectorAll('img, image')) {
+        const src = el.localName === 'img' ? el.getAttribute('src')
+          : el.getAttribute('href') || el.getAttribute('xlink:href');
+        const image = resolveImage(entry.name, src);
+        if (!image) continue;
+        const alt = (el.getAttribute('alt') || image.name).replace(/\s+/g, ' ')
+          .replace(/[\\[\]`*_<>]/g, '\\$&');
+        el.appendChild(doc.createTextNode(`![${alt}](${image.markdownPath})`));
+        inserted = true;
+      }
+      if ((targets || inserted) && body.textContent.trim()) {
+        sections = getMarkdownSections(body, targets || [], options);
+      }
+    }
   } else {
     // 파싱 실패 시 태그 수동 제거
     text = html.replace(/<[^>]*>/g, ' ');
@@ -658,6 +673,50 @@ async function convertEpubToText(file, options, format) {
 
   const targets = format === 'markdown' ? indexMarkdownToc(tocData, tocPath, zip) : null;
 
+  // 이미지 데이터 — 이미지 파일 탐색 및 Blob URL 생성
+  const imageExtensions = /\.(jpe?g|png|gif|svg|webp)$/i;
+  const imageData = [];
+  const imagesByEntry = new Map();
+  for (const [name, entry] of Object.entries(zip.files)) {
+    if (entry.dir) continue;
+    const normalized = normalizeEntryName(name);
+    if (!imageExtensions.test(normalized)) continue;
+    try {
+      const blob = await entry.async('blob');
+      const url = URL.createObjectURL(blob);
+      const fileName = normalized.split('/').pop();
+      const image = {
+        blob,
+        name: fileName,
+        fullPath: normalized,
+        blobUrl: url,
+        size: blob.size,
+        // MIME 타입 추론
+        type: blob.type || guessMimeType(fileName)
+      };
+      imageData.push(image);
+      imagesByEntry.set(entry.name, image);
+    } catch (e) {
+      addLog(`⚠ 이미지 로드 실패: ${normalizeEntryName(name)}`);
+    }
+  }
+  if (imageData.length > 0) {
+    addLog(`🖼 ${imageData.length}개 이미지 발견`);
+  }
+
+  let imageNumber = 0;
+  function resolveImage(chapterPath, src) {
+    if (!src || /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(src)) return null;
+    const dir = chapterPath.slice(0, chapterPath.lastIndexOf('/') + 1);
+    const entry = findZipEntry(zip, resolveZipPath(dir, src));
+    const image = entry && imagesByEntry.get(entry.name);
+    if (image && !image.markdownPath) {
+      const ext = image.name.split('.').pop().toLowerCase();
+      image.markdownPath = `images/figure-${++imageNumber}.${ext}`;
+    }
+    return image;
+  }
+
   // 6) spine 순서대로 챕터 추출
   const chapters = [];
   let processedCount = 0;
@@ -675,9 +734,10 @@ async function convertEpubToText(file, options, format) {
       addLog(`⚠ 최대 파일 수(${MAX_FILES}) 도달, 나머지 스킵`);
       break;
     }
-    const chapter = await extractChapter(entry, chapters.length + 1, options, targets?.get(entry.name));
+    const chapter = await extractChapter(entry, chapters.length + 1, options, targets?.get(entry.name),
+      targets ? resolveImage : null);
     // 빈 챕터 스킵
-    if (chapter.text.trim().length > 0) {
+    if (chapter.text.trim() || chapter.sections?.some(section => section.text.trim())) {
       chapters.push(chapter);
     }
     processedCount++;
@@ -706,33 +766,6 @@ async function convertEpubToText(file, options, format) {
       // _data 크기는 압축 전 크기 (비동기 로드 전이라 대략값)
       size: entry._data ? (entry._data.uncompressedSize || 0) : 0
     });
-  }
-
-  // 8) 이미지 데이터 — 이미지 파일 탐색 및 Blob URL 생성
-  const imageExtensions = /\.(jpe?g|png|gif|svg|webp)$/i;
-  const imageData = [];
-  for (const [name, entry] of Object.entries(zip.files)) {
-    if (entry.dir) continue;
-    const normalized = normalizeEntryName(name);
-    if (!imageExtensions.test(normalized)) continue;
-    try {
-      const blob = await entry.async('blob');
-      const url = URL.createObjectURL(blob);
-      const fileName = normalized.split('/').pop();
-      imageData.push({
-        name: fileName,
-        fullPath: normalized,
-        blobUrl: url,
-        size: blob.size,
-        // MIME 타입 추론
-        type: blob.type || guessMimeType(fileName)
-      });
-    } catch (e) {
-      addLog(`⚠ 이미지 로드 실패: ${normalizeEntryName(name)}`);
-    }
-  }
-  if (imageData.length > 0) {
-    addLog(`🖼 ${imageData.length}개 이미지 발견`);
   }
 
   // 9) 최종 출력 빌드
@@ -949,9 +982,26 @@ function triggerDownload(blob, filename) {
   }, 100);
 }
 
-/** 단일 작업 다운로드 */
-function downloadJob(job) {
+function hasMarkdownImages(job) {
+  return job.imageData?.some(image => image.markdownPath);
+}
+
+function addJobToZip(zip, job) {
+  zip.file(job.outputName, job.content);
+  for (const image of job.imageData || []) {
+    if (image.markdownPath) zip.file(image.markdownPath, image.blob);
+  }
+}
+
+/** 그림이 있는 Markdown은 상대 경로가 유지되도록 함께 압축한다. */
+async function downloadJob(job) {
   if (!job || !job.content) return;
+  if (hasMarkdownImages(job)) {
+    const zip = new JSZip();
+    addJobToZip(zip, job);
+    triggerDownload(await zip.generateAsync({ type: 'blob' }), job.outputName.replace(/\.md$/i, '.zip'));
+    return;
+  }
   const blob = new Blob([job.content], { type: 'text/plain;charset=utf-8' });
   triggerDownload(blob, job.outputName || 'output.txt');
 }
@@ -964,14 +1014,15 @@ async function downloadAll() {
     return;
   }
   if (successJobs.length === 1) {
-    downloadJob(successJobs[0]);
+    await downloadJob(successJobs[0]);
     return;
   }
   // 다중 파일 → ZIP으로 묶어서 다운로드
   addLog(`📦 ${successJobs.length}개 파일을 ZIP으로 묶는 중...`);
   const zip = new JSZip();
   for (const job of successJobs) {
-    zip.file(job.outputName, job.content);
+    const folder = hasMarkdownImages(job) ? zip.folder(job.outputName + '-book') : zip;
+    addJobToZip(folder, job);
   }
   const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
   triggerDownload(blob, 'epub-workbench-output.zip');
@@ -1246,7 +1297,8 @@ function renderDashboard() {
 
   // 내보내기 요약 텍스트
   if (success > 0) {
-    const format = getSelectedFormat().toUpperCase();
+    const completed = jobs.filter(job => job.status === 'success');
+    const format = success > 1 || hasMarkdownImages(completed[0]) ? 'ZIP' : completed[0].format.toUpperCase();
     $('exportSummary').textContent = `${success}개 파일 변환 완료. 다운로드 가능합니다.`;
     $('downloadAllBtn').textContent = `⬇ ${format} 다운로드${success > 1 ? ` (${success})` : ''}`;
   } else {
@@ -1638,12 +1690,7 @@ function updateFormatIndicator() {
     const labels = { txt: 'TXT', markdown: 'MD', json: 'JSON', html: 'HTML' };
     indicator.textContent = labels[format] || 'TXT';
   }
-  // 다운로드 버튼 텍스트도 반영
-  const successCount = jobs.filter((j) => j.status === 'success').length;
-  const btn = $('downloadAllBtn');
-  if (btn) {
-    btn.textContent = `⬇ ${format.toUpperCase()} 다운로드${successCount > 1 ? ` (${successCount})` : ''}`;
-  }
+  renderDashboard();
 }
 
 // ─── 로그 토글 ───

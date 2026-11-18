@@ -1,7 +1,7 @@
 // EPUB Workbench — Service Worker
 // 오프라인 동작을 위해 핵심 파일과 CDN 리소스를 캐시합니다.
 
-const CACHE_NAME = 'epub-wb-v2';
+const CACHE_NAME = 'epub-wb-v3';
 
 // 캐시할 핵심 자원 목록
 const CORE_ASSETS = [
