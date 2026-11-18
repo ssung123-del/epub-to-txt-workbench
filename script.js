@@ -167,12 +167,9 @@ function normalizeEntryName(value) {
 
 /** 상대 경로를 기준 디렉토리 기반으로 절대 경로로 변환 */
 function resolveZipPath(baseDir, href) {
-  const decoded = decodeZipPath(href);
-  // 프래그먼트(#) 제거
-  const clean = decoded.split('#')[0];
-  if (!baseDir) return clean;
+  const clean = decodeZipPath(href.split(/[?#]/, 1)[0]);
   // 상대경로를 기준 디렉토리와 결합
-  const parts = (baseDir + '/' + clean).split('/');
+  const parts = (clean.startsWith('/') ? clean : baseDir + '/' + clean).split('/');
   const resolved = [];
   for (const p of parts) {
     if (p === '..') resolved.pop();
@@ -263,7 +260,7 @@ function getChapterTitle(htmlDoc, fallback) {
 }
 
 /** ZIP 엔트리에서 챕터 텍스트 추출 — HTML 태그 제거, 공백 정규화 */
-async function extractChapter(entry, num, options) {
+async function extractChapter(entry, num, options, targets) {
   const html = await entry.async('string');
   const doc = parseXml(html, `Chapter ${num}`);
   const fallback = `Chapter ${num}`;
@@ -271,15 +268,17 @@ async function extractChapter(entry, num, options) {
 
   // body에서 텍스트 추출 (태그 제거)
   let text = '';
+  let sections;
   if (doc) {
     const body = doc.querySelector('body') || doc.documentElement;
     text = body ? body.textContent : '';
+    if (targets && text.trim()) sections = getMarkdownSections(body, targets, options);
   } else {
     // 파싱 실패 시 태그 수동 제거
     text = html.replace(/<[^>]*>/g, ' ');
   }
   text = normalizeExtractedText(text, options.normalizeWhitespace);
-  return { title, text };
+  return { title, text, sections };
 }
 
 // ─── 포맷 관련 유틸리티 ───
@@ -317,7 +316,7 @@ function buildTxtOutput(chapters, metadata, sourceName, options) {
 }
 
 // ─── 출력 빌더: Markdown ───
-function buildMarkdownOutput(chapters, metadata, sourceName, options) {
+function buildMarkdownOutput(chapters, metadata, sourceName, options, tocData) {
   const lines = [];
   // YAML frontmatter
   lines.push('---');
@@ -329,12 +328,36 @@ function buildMarkdownOutput(chapters, metadata, sourceName, options) {
   lines.push('');
   lines.push(`# ${metadata.title}`);
   lines.push('');
+  const label = title => title.replace(/\s+/g, ' ').replace(/[\\`*_{}[\]<>#!|~]/g, '\\$&');
+  function appendToc(items, depth) {
+    for (const item of items) {
+      const title = label(item.title);
+      const link = item.anchor ? `[${title}](#${item.anchor})` : title;
+      lines.push(`${'    '.repeat(depth)}- ${link}`);
+      appendToc(item.children, depth + 1);
+    }
+  }
+  lines.push('## 목차', '');
+  if (tocData?.length) {
+    appendToc(tocData, 0);
+  } else {
+    chapters.forEach((ch, i) => lines.push(`- [${label(ch.title)}](#epub-chapter-${i + 1})`));
+  }
+  lines.push('');
   chapters.forEach((ch, i) => {
-    if (i > 0) lines.push('', '---', '');
-    lines.push(`## Chapter ${i + 1}: ${ch.title}`);
-    lines.push('');
-    lines.push(ch.text);
-    lines.push('');
+    if (i > 0 && options.includeChapterBreaks) lines.push('---', '');
+    const sections = ch.sections || [{ entries: [], text: ch.text }];
+    for (const section of sections) {
+      if (!section.entries.length && !section.text.trim()) continue;
+      if (section.entries.length) {
+        for (const { item, anchor, depth } of section.entries) {
+          lines.push(`<a id="${anchor}"></a>`, '', `${'#'.repeat(Math.min(6, depth + 2))} ${label(item.title)}`, '');
+        }
+      } else {
+        lines.push(`<a id="epub-chapter-${i + 1}"></a>`, '', `## ${label(ch.title)}`, '');
+      }
+      lines.push(section.text, '');
+    }
   });
   return lines.join('\n').trim();
 }
@@ -405,9 +428,9 @@ ${sections}
 }
 
 // ─── 출력 빌더 라우터 ───
-function buildOutput(chapters, metadata, sourceName, options, format) {
+function buildOutput(chapters, metadata, sourceName, options, format, tocData) {
   switch (format) {
-    case 'markdown': return buildMarkdownOutput(chapters, metadata, sourceName, options);
+    case 'markdown': return buildMarkdownOutput(chapters, metadata, sourceName, options, tocData);
     case 'json': return buildJsonOutput(chapters, metadata, sourceName);
     case 'html': return buildHtmlOutput(chapters, metadata, sourceName);
     default: return buildTxtOutput(chapters, metadata, sourceName, options);
@@ -418,44 +441,32 @@ function buildOutput(chapters, metadata, sourceName, options, format) {
 /** EPUB 2 toc.ncx에서 목차 트리 추출 */
 function parseTocNcx(ncxDoc) {
   if (!ncxDoc) return [];
-  const navPoints = getElementsByLocalName(ncxDoc, 'navPoint');
-  const items = [];
-  for (const np of navPoints) {
-    // 직접 자식 navPoint가 아닌 경우 최상위만 처리
-    const label = getFirstByLocalName(np, 'text');
-    const content = getFirstByLocalName(np, 'content');
-    const text = label ? sanitizeText(label.textContent, '(제목 없음)') : '(제목 없음)';
-    const src = content ? content.getAttribute('src') || '' : '';
-    // 자식 navPoint 재귀 처리
-    const children = [];
-    const childNavPoints = Array.from(np.children || []).filter(
-      (c) => c.localName === 'navPoint'
-    );
-    for (const cnp of childNavPoints) {
-      const cLabel = getFirstByLocalName(cnp, 'text');
-      const cContent = getFirstByLocalName(cnp, 'content');
-      children.push({
-        title: cLabel ? sanitizeText(cLabel.textContent, '(제목 없음)') : '(제목 없음)',
-        src: cContent ? cContent.getAttribute('src') || '' : '',
-        children: []
+  function readPoints(parent) {
+    return Array.from(parent.children)
+      .filter(el => el.localName === 'navPoint')
+      .map(point => {
+        const label = point.querySelector(':scope > navLabel');
+        const content = point.querySelector(':scope > content');
+        return {
+          title: sanitizeText(label?.textContent, '(제목 없음)'),
+          src: content?.getAttribute('src') || '',
+          children: readPoints(point)
+        };
       });
-    }
-    // 이미 자식으로 처리된 항목은 최상위에서 제거하기 위해 playOrder 활용
-    items.push({ title: text, src, children });
   }
-  // 최상위 항목만 반환 (중첩 navPoint가 이미 자식에 포함됨)
-  // 간단한 접근: playOrder 없이 depth-1만 취급
-  return deduplicateTocItems(items);
+  const navMap = getFirstByLocalName(ncxDoc, 'navMap');
+  return navMap ? readPoints(navMap) : [];
 }
 
 /** EPUB 3 nav.xhtml에서 목차 추출 */
 function parseTocNav(navDoc) {
   if (!navDoc) return [];
-  // nav[epub:type="toc"] 또는 첫 번째 nav 요소
-  const navEl = navDoc.querySelector('nav[epub\\:type="toc"]')
-    || navDoc.querySelector('nav')
-    || navDoc;
-  const ol = navEl.querySelector('ol');
+  const navs = Array.from(navDoc.querySelectorAll('nav'));
+  const navEl = navs.find(nav =>
+    (nav.getAttribute('epub:type') || '').split(/\s+/).includes('toc') ||
+    (nav.getAttribute('role') || '').split(/\s+/).includes('doc-toc')
+  ) || navs.find(nav => !nav.hasAttribute('epub:type') && !nav.hasAttribute('role'));
+  const ol = navEl?.querySelector('ol');
   if (!ol) return [];
   return parseNavOl(ol);
 }
@@ -465,31 +476,81 @@ function parseNavOl(ol) {
   const items = [];
   const lis = Array.from(ol.children).filter((c) => c.tagName === 'LI' || c.localName === 'li');
   for (const li of lis) {
-    const a = li.querySelector('a');
-    const span = li.querySelector('span');
+    const a = li.querySelector(':scope > a');
+    const span = li.querySelector(':scope > span');
     const title = a ? sanitizeText(a.textContent, '(제목 없음)')
       : span ? sanitizeText(span.textContent, '(제목 없음)')
       : '(제목 없음)';
     const src = a ? (a.getAttribute('href') || '') : '';
-    const childOl = li.querySelector('ol');
+    const childOl = li.querySelector(':scope > ol');
     const children = childOl ? parseNavOl(childOl) : [];
     items.push({ title, src, children });
   }
   return items;
 }
 
-/** 중복 TOC 항목 제거 — navPoint 중첩으로 인한 중복 방지 */
-function deduplicateTocItems(items) {
-  const seen = new Set();
-  const result = [];
-  for (const item of items) {
-    const key = item.title + '|' + item.src;
-    if (!seen.has(key)) {
-      seen.add(key);
-      result.push(item);
+// 목차 문서 기준으로 링크를 해석하고 같은 본문 파일의 절들을 모은다.
+function indexMarkdownToc(items, tocPath, zip) {
+  const byFile = new Map();
+  let number = 0;
+  function visit(nodes, depth) {
+    for (const item of nodes) {
+      if (item.src && !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(item.src)) {
+        const hash = item.src.indexOf('#');
+        const path = hash === 0 ? tocPath : resolveZipPath(tocPath.slice(0, tocPath.lastIndexOf('/') + 1), item.src);
+        const entry = findZipEntry(zip, path);
+        if (entry) {
+          if (!byFile.has(entry.name)) byFile.set(entry.name, []);
+          byFile.get(entry.name).push({
+            item, depth, anchor: `epub-section-${++number}`,
+            fragment: hash < 0 ? '' : decodeZipPath(item.src.slice(hash + 1))
+          });
+        }
+      }
+      visit(item.children, depth + 1);
     }
   }
-  return result;
+  visit(items, 0);
+  return byFile;
+}
+
+// 공백 정리 전 문자 위치를 사용해야 압축된 XHTML에서도 절 경계가 보존된다.
+function getMarkdownSections(body, targets, options) {
+  const offsets = new Map();
+  const headingLengths = new Map();
+  const walker = body.ownerDocument.createTreeWalker(body, NodeFilter.SHOW_ALL);
+  let offset = 0;
+  for (let node = body; node; node = walker.nextNode()) {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      const id = node.getAttribute('id') || node.getAttribute('name');
+      if (id && !offsets.has(id)) offsets.set(id, offset);
+      if (/^h[1-6]$/i.test(node.localName)) headingLengths.set(offset, node.textContent.length);
+    } else if (node.nodeType === Node.TEXT_NODE || node.nodeType === Node.CDATA_SECTION_NODE) {
+      offset += node.length;
+    }
+  }
+  const raw = body.textContent;
+  const boundaries = new Map([[0, []]]);
+  for (const target of targets) {
+    const pos = target.fragment ? offsets.get(target.fragment) : 0;
+    if (pos === undefined) continue;
+    if (!boundaries.has(pos)) boundaries.set(pos, []);
+    boundaries.get(pos).push(target);
+    target.item.anchor = target.anchor;
+  }
+  const positions = Array.from(boundaries.keys()).sort((a, b) => a - b);
+  return positions.map((pos, i) => {
+    const entries = boundaries.get(pos);
+    let part = raw.slice(pos, positions[i + 1]);
+    const leading = part.length - part.trimStart().length;
+    const start = headingLengths.has(pos) ? 0 : leading;
+    const length = headingLengths.get(pos + start);
+    const heading = length && start + length <= part.length && part.slice(start, start + length).trim();
+    if (heading && entries.some(entry => entry.item.title === heading)) {
+      part = part.slice(start + length);
+    }
+    return { entries, text: normalizeExtractedText(part, options.normalizeWhitespace) };
+  });
 }
 
 // ─── 핵심: EPUB 변환 ───
@@ -565,7 +626,39 @@ async function convertEpubToText(file, options, format) {
     }
   }
 
-  // 5) spine 순서대로 챕터 추출
+  // 5) TOC 데이터 추출 — nav.xhtml (EPUB 3) 우선, 없으면 toc.ncx (EPUB 2)
+  let tocPath = '';
+  let tocData = [];
+  try {
+    if (tocNavHref) {
+      const navPath = resolveZipPath(opfDir, tocNavHref);
+      const navEntry = findZipEntry(zip, navPath);
+      if (navEntry) {
+        const navHtml = await navEntry.async('string');
+        const navDoc = parseXml(navHtml, 'nav.xhtml');
+        tocPath = navEntry.name;
+        tocData = parseTocNav(navDoc);
+        addLog(`📑 EPUB 3 목차 추출: ${tocData.length}개 항목`);
+      }
+    }
+    if (tocData.length === 0 && tocNcxHref) {
+      const ncxPath = resolveZipPath(opfDir, tocNcxHref);
+      const ncxEntry = findZipEntry(zip, ncxPath);
+      if (ncxEntry) {
+        const ncxXml = await ncxEntry.async('string');
+        const ncxDoc = parseXml(ncxXml, 'toc.ncx');
+        tocPath = ncxEntry.name;
+        tocData = parseTocNcx(ncxDoc);
+        addLog(`📑 EPUB 2 목차 추출: ${tocData.length}개 항목`);
+      }
+    }
+  } catch (e) {
+    addLog(`⚠ TOC 추출 중 오류: ${e.message}`);
+  }
+
+  const targets = format === 'markdown' ? indexMarkdownToc(tocData, tocPath, zip) : null;
+
+  // 6) spine 순서대로 챕터 추출
   const chapters = [];
   let processedCount = 0;
   for (const itemref of spineItems) {
@@ -578,12 +671,11 @@ async function convertEpubToText(file, options, format) {
       addLog(`⚠ 챕터 파일 없음: ${fullPath}`);
       continue;
     }
-    // 제한: 최대 80개 파일까지만 처리
-    if (processedCount >= MAX_FILES) {
+    if (format !== 'markdown' && processedCount >= MAX_FILES) {
       addLog(`⚠ 최대 파일 수(${MAX_FILES}) 도달, 나머지 스킵`);
       break;
     }
-    const chapter = await extractChapter(entry, chapters.length + 1, options);
+    const chapter = await extractChapter(entry, chapters.length + 1, options, targets?.get(entry.name));
     // 빈 챕터 스킵
     if (chapter.text.trim().length > 0) {
       chapters.push(chapter);
@@ -599,33 +691,6 @@ async function convertEpubToText(file, options, format) {
   }
 
   addLog(`✅ ${chapters.length}개 챕터 추출 완료`);
-
-  // 6) TOC 데이터 추출 — nav.xhtml (EPUB 3) 우선, 없으면 toc.ncx (EPUB 2)
-  let tocData = [];
-  try {
-    if (tocNavHref) {
-      const navPath = resolveZipPath(opfDir, tocNavHref);
-      const navEntry = findZipEntry(zip, navPath);
-      if (navEntry) {
-        const navHtml = await navEntry.async('string');
-        const navDoc = parseXml(navHtml, 'nav.xhtml');
-        tocData = parseTocNav(navDoc);
-        addLog(`📑 EPUB 3 목차 추출: ${tocData.length}개 항목`);
-      }
-    }
-    if (tocData.length === 0 && tocNcxHref) {
-      const ncxPath = resolveZipPath(opfDir, tocNcxHref);
-      const ncxEntry = findZipEntry(zip, ncxPath);
-      if (ncxEntry) {
-        const ncxXml = await ncxEntry.async('string');
-        const ncxDoc = parseXml(ncxXml, 'toc.ncx');
-        tocData = parseTocNcx(ncxDoc);
-        addLog(`📑 EPUB 2 목차 추출: ${tocData.length}개 항목`);
-      }
-    }
-  } catch (e) {
-    addLog(`⚠ TOC 추출 중 오류: ${e.message}`);
-  }
 
   // 7) 구조 데이터 — ZIP 내 모든 파일을 디렉토리 트리로 구성
   const structureData = {};
@@ -671,7 +736,7 @@ async function convertEpubToText(file, options, format) {
   }
 
   // 9) 최종 출력 빌드
-  const content = buildOutput(chapters, metadata, file.name, options, format);
+  const content = buildOutput(chapters, metadata, file.name, options, format, tocData);
   const charCount = chapters.reduce((s, c) => s + c.text.length, 0);
   const wordCount = chapters.reduce((s, c) => s + c.text.split(/\s+/).filter(Boolean).length, 0);
 
